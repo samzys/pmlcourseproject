@@ -1,0 +1,143 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+```
+---
+title: "PML course Project Writeup"
+author: "samzys"
+date: "October 25, 2015"
+output: html_document
+---
+
+##**Practical Machine Learning**
+
+###**Background**
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website [here:](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset). 
+
+
+####Getting Data 
+
+The training data for this project are available [here:](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+
+The test data are available [here:](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment. 
+
+
+```{r, echo=FALSE}
+library(Hmisc)
+library(caret)
+library(randomForest)
+library(foreach)
+library(doParallel)
+library(dplyr)
+setwd("C:/Users/Sam/Dropbox/datascience/CourseProject")
+```
+
+###**Cleaning Data**
+Download the data into workspace, by some visual inspection, mostly data columns are numerical. In addition to the standard NA, there are empty strings "" and error expressions "#DIV/0!".
+
+In addtional, to further clean the data, there are some columns to be removed
+1. non significant columns or column contains personal informaiton: column 1-6
+2. Some columns were mostly blank.These did not contribute well to the prediction. Hence, only keep the complete columns
+
+
+
+```{r}
+#loading data
+
+trainingRaw <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!", ""), stringsAsFactors = FALSE, row.names = 1)
+
+# convert classe to factor
+trainingRaw$classe = as.factor(trainingRaw$classe)
+# remove the non significant variabels
+trainingRaw <-trainingRaw[,-(1:6)]
+
+#remove columns that have all NAs 
+trainingRaw<-trainingRaw[,colSums(is.na(trainingRaw))==0]
+dim(trainingRaw)
+
+```
+
+###**PreProcessing**
+Split the Data into training and testing with a ratio of 0.75
+```{r}
+set.seed(12345)
+inTrain <- createDataPartition(trainingRaw$classe,p=0.75,list=FALSE)
+subTraining<-trainingRaw[inTrain, ]
+subValidation<-trainingRaw[-inTrain,]
+str(subTraining)
+```
+
+
+###List of candidate predictors
+```{r}
+modelVars<-names(subTraining)
+modelVars1<-modelVars[-grep("classe", modelVars)]
+modelVars1
+```
+
+###**Build a random forest model**
+Using a random forest with preditors in modelVars1 to predict classe variable. Random forest trees were generated for the training dataset using **cross-validation**. 
+
+
+```{r}
+set.seed(3333)
+fitControl<-trainControl(method="cv", number=5, allowParallel = T, verboseIter = T)
+modelFit<-train(classe ~., data=subTraining, method="rf", trControl=fitControl)
+```
+
+
+###**Get Error Estimates**
+Begin with an insample error estimate (from trainData - which is 75% of pml-training.csv)
+
+```{r}
+
+#get the predict value
+predTrain<-predict(modelFit, newdata=subTraining)
+
+# use confusionMatrix to get the insample error
+confusionMatrix(predTrain, subTraining$classe)
+
+
+```
+Now getting the out of sample error estimate (from testData - which is 25% of pml-training.csv) 
+
+```{r}
+#get the predict value
+predValidation<-predict(modelFit, newdata = subValidation)
+
+confusionMatrix(predValidation, subValidation$classe )
+```
+
+The model has the out of sample error rate of 0.9931  
+
+Then the generated algorithm was examnined under the partitioned training set(subValidation) to examine the accuracy and estimated error of prediction. By using *53 predictors* for five classes(A,B,C,D,E) using **cross-validation** at a **5-fold** an accuracy of **99.3%** with a 95% CI [0.990-0.995] was achieved accompanied by a Kappa value of 0.99. The model seems a good fit.
+
+
+
+
+###**Predicting exercise using the model**  
+```{r}
+
+testingRaw <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!", ""), stringsAsFactors = FALSE)
+
+cleanTestingData<-testingRaw[,modelVars1]
+
+pred20<-predict(modelFit, cleanTestingData)
+#pred20
+```
+Once, the predictions were obtained for the 20 test cases provided, the below shown script was used to obtain single text files to be uploaded to the courses web site to comply with the submission assigment. 20 out of 20 hits also confirmed the accuracy of the obtained models.
+
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(pred20)
+```
+
+
